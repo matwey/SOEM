@@ -40,7 +40,7 @@ void simpletest(char *ifname)
       /* find and auto-config slaves */
 
 
-       if ( ec_config_init(FALSE) > 0 )
+       if ( ec_config_init(TRUE) > 0 )
       {
          printf("%d slaves found and configured.\n",ec_slavecount);
 

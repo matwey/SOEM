@@ -518,7 +518,7 @@ void slaveinfo(char *ifname)
    {
       printf("ec_init on %s succeeded.\n",ifname);
       /* find and auto-config slaves */
-      if ( ec_config(FALSE, &IOmap) > 0 )
+      if ( ec_config(TRUE, &IOmap) > 0 )
       {
          ec_configdc();
          while(EcatError) printf("%s", ec_elist2string());
