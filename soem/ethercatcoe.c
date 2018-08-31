@@ -1,42 +1,6 @@
 /*
- * Simple Open EtherCAT Master Library
- *
- * File    : ethercatcoe.c
- * Version : 1.3.1
- * Date    : 11-03-2015
- * Copyright (C) 2005-2015 Speciaal Machinefabriek Ketels v.o.f.
- * Copyright (C) 2005-2015 Arthur Ketels
- * Copyright (C) 2008-2009 TU/e Technische Universiteit Eindhoven
- * Copyright (C) 2014-2015 rt-labs AB , Sweden
- *
- * SOEM is free software; you can redistribute it and/or modify it under
- * the terms of the GNU General Public License version 2 as published by the Free
- * Software Foundation.
- *
- * SOEM is distributed in the hope that it will be useful, but WITHOUT ANY
- * WARRANTY; without even the implied warranty of MERCHANTABILITY or
- * FITNESS FOR A PARTICULAR PURPOSE.  See the GNU General Public License
- * for more details.
- *
- * As a special exception, if other files instantiate templates or use macros
- * or inline functions from this file, or you compile this file and link it
- * with other works to produce a work based on this file, this file does not
- * by itself cause the resulting work to be covered by the GNU General Public
- * License. However the source code for this file must still be made available
- * in accordance with section (3) of the GNU General Public License.
- *
- * This exception does not invalidate any other reasons why a work based on
- * this file might be covered by the GNU General Public License.
- *
- * The EtherCAT Technology, the trade name and logo “EtherCAT” are the intellectual
- * property of, and protected by Beckhoff Automation GmbH. You can use SOEM for
- * the sole purpose of creating, using and/or selling or otherwise distributing
- * an EtherCAT network master provided that an EtherCAT Master License is obtained
- * from Beckhoff Automation GmbH.
- *
- * In case you did not receive a copy of the EtherCAT Master License along with
- * SOEM write to Beckhoff Automation GmbH, Eiserstraße 5, D-33415 Verl, Germany
- * (www.beckhoff.com).
+ * Licensed under the GNU General Public License version 2 with exceptions. See
+ * LICENSE file in the project root for full license information
  */
 
 /** \file
@@ -769,39 +733,43 @@ int ecx_readPDOassign(ecx_contextt *context, uint16 Slave, uint16 PDOassign)
 /** Read PDO assign structure in Complete Access mode
  * @param[in]  context       = context struct
  * @param[in]  Slave         = Slave number
+ * @param[in]  Thread_n      = Calling thread index
  * @param[in]  PDOassign     = PDO assign object
  * @return total bitlength of PDO assign
  */
-int ecx_readPDOassignCA(ecx_contextt *context, uint16 Slave, uint16 PDOassign)
+int ecx_readPDOassignCA(ecx_contextt *context, uint16 Slave, int Thread_n,
+      uint16 PDOassign)
 {
    uint16 idxloop, nidx, subidxloop, idx, subidx;
    int wkc, bsize = 0, rdl;
 
    /* find maximum size of PDOassign buffer */
    rdl = sizeof(ec_PDOassignt);
-   context->PDOassign->n=0;
+   context->PDOassign[Thread_n].n=0;
    /* read rxPDOassign in CA mode, all subindexes are read in one struct */
-   wkc = ecx_SDOread(context, Slave, PDOassign, 0x00, TRUE, &rdl, context->PDOassign, EC_TIMEOUTRXM);
+   wkc = ecx_SDOread(context, Slave, PDOassign, 0x00, TRUE, &rdl,
+         &(context->PDOassign[Thread_n]), EC_TIMEOUTRXM);
    /* positive result from slave ? */
-   if ((wkc > 0) && (context->PDOassign->n > 0))
+   if ((wkc > 0) && (context->PDOassign[Thread_n].n > 0))
    {
-      nidx = context->PDOassign->n;
+      nidx = context->PDOassign[Thread_n].n;
       bsize = 0;
       /* for each PDO do */
       for (idxloop = 1; idxloop <= nidx; idxloop++)
       {
          /* get index from PDOassign struct */
-         idx = etohs(context->PDOassign->index[idxloop - 1]);
+         idx = etohs(context->PDOassign[Thread_n].index[idxloop - 1]);
          if (idx > 0)
          {
-            rdl = sizeof(ec_PDOdesct); context->PDOdesc->n = 0;
+            rdl = sizeof(ec_PDOdesct); context->PDOdesc[Thread_n].n = 0;
             /* read SDO's that are mapped in PDO, CA mode */
-            wkc = ecx_SDOread(context, Slave,idx, 0x00, TRUE, &rdl, context->PDOdesc, EC_TIMEOUTRXM);
-            subidx = context->PDOdesc->n;
+            wkc = ecx_SDOread(context, Slave,idx, 0x00, TRUE, &rdl,
+                  &(context->PDOdesc[Thread_n]), EC_TIMEOUTRXM);
+            subidx = context->PDOdesc[Thread_n].n;
             /* extract all bitlengths of SDO's */
             for (subidxloop = 1; subidxloop <= subidx; subidxloop++)
             {
-               bsize += LO_BYTE(etohl(context->PDOdesc->PDO[subidxloop -1]));
+               bsize += LO_BYTE(etohl(context->PDOdesc[Thread_n].PDO[subidxloop -1]));
             }
          }
       }
@@ -932,13 +900,14 @@ int ecx_readPDOmap(ecx_contextt *context, uint16 Slave, int *Osize, int *Isize)
  * tries to read them and collect a full input and output mapping size
  * of designated slave. Slave has to support CA, otherwise use ec_readPDOmap().
  *
- * @param[in]  context = context struct
- * @param[in]  Slave   = Slave number
- * @param[out] Osize   = Size in bits of output mapping (rxPDO) found
- * @param[out] Isize   = Size in bits of input mapping (txPDO) found
+ * @param[in]  context  = context struct
+ * @param[in]  Slave    = Slave number
+ * @param[in]  Thread_n = Calling thread index
+ * @param[out] Osize    = Size in bits of output mapping (rxPDO) found
+ * @param[out] Isize    = Size in bits of input mapping (txPDO) found
  * @return >0 if mapping succesful.
  */
-int ecx_readPDOmapCA(ecx_contextt *context, uint16 Slave, int *Osize, int *Isize)
+int ecx_readPDOmapCA(ecx_contextt *context, uint16 Slave, int Thread_n, int *Osize, int *Isize)
 {
    int wkc, rdl;
    int retVal = 0;
@@ -950,13 +919,14 @@ int ecx_readPDOmapCA(ecx_contextt *context, uint16 Slave, int *Osize, int *Isize
    *Osize = 0;
    SMt_bug_add = 0;
    rdl = sizeof(ec_SMcommtypet);
-   context->SMcommtype->n = 0;
+   context->SMcommtype[Thread_n].n = 0;
    /* read SyncManager Communication Type object count Complete Access*/
-   wkc = ecx_SDOread(context, Slave, ECT_SDO_SMCOMMTYPE, 0x00, TRUE, &rdl, context->SMcommtype, EC_TIMEOUTRXM);
+   wkc = ecx_SDOread(context, Slave, ECT_SDO_SMCOMMTYPE, 0x00, TRUE, &rdl,
+         &(context->SMcommtype[Thread_n]), EC_TIMEOUTRXM);
    /* positive result from slave ? */
-   if ((wkc > 0) && (context->SMcommtype->n > 2))
+   if ((wkc > 0) && (context->SMcommtype[Thread_n].n > 2))
    {
-      nSM = context->SMcommtype->n;
+      nSM = context->SMcommtype[Thread_n].n;
       /* limit to maximum number of SM defined, if true the slave can't be configured */
       if (nSM > EC_MAXSM)
       {
@@ -966,7 +936,7 @@ int ecx_readPDOmapCA(ecx_contextt *context, uint16 Slave, int *Osize, int *Isize
       /* iterate for every SM type defined */
       for (iSM = 2 ; iSM < nSM ; iSM++)
       {
-         tSM = context->SMcommtype->SMtype[iSM];
+         tSM = context->SMcommtype[Thread_n].SMtype[iSM];
 
 // start slave bug prevention code, remove if possible
          if((iSM == 2) && (tSM == 2)) // SM2 has type 2 == mailbox out, this is a bug in the slave!
@@ -989,7 +959,8 @@ int ecx_readPDOmapCA(ecx_contextt *context, uint16 Slave, int *Osize, int *Isize
          if ((tSM == 3) || (tSM == 4))
          {
             /* read the assign PDO */
-            Tsize = ecx_readPDOassignCA(context, Slave, ECT_SDO_PDOASSIGN + iSM );
+            Tsize = ecx_readPDOassignCA(context, Slave, Thread_n,
+                  ECT_SDO_PDOASSIGN + iSM );
             /* if a mapping is found */
             if (Tsize)
             {
@@ -1445,12 +1416,13 @@ int ec_readPDOassign(uint16 Slave, uint16 PDOassign)
 /** Read PDO assign structure in Complete Access mode
  * @param[in]  Slave         = Slave number
  * @param[in]  PDOassign     = PDO assign object
+ * @param[in]  Thread_n      = Calling thread index
  * @return total bitlength of PDO assign
  * @see ecx_readPDOmap
  */
-int ec_readPDOassignCA(uint16 Slave, uint16 PDOassign)
+int ec_readPDOassignCA(uint16 Slave, uint16 PDOassign, int Thread_n)
 {
-   return ecx_readPDOassignCA(&ecx_context, Slave, PDOassign);
+   return ecx_readPDOassignCA(&ecx_context, Slave, Thread_n, PDOassign);
 }
 
 /** CoE read PDO mapping.
@@ -1478,14 +1450,15 @@ int ec_readPDOmap(uint16 Slave, int *Osize, int *Isize)
  * of designated slave. Slave has to support CA, otherwise use ec_readPDOmap().
  *
  * @param[in] Slave    = Slave number
+ * @param[in] Thread_n = Calling thread index
  * @param[out] Osize   = Size in bits of output mapping (rxPDO) found
  * @param[out] Isize   = Size in bits of input mapping (txPDO) found
  * @return >0 if mapping succesful.
  * @see ecx_readPDOmap ec_readPDOmapCA
  */
-int ec_readPDOmapCA(uint16 Slave, int *Osize, int *Isize)
+int ec_readPDOmapCA(uint16 Slave, int Thread_n, int *Osize, int *Isize)
 {
-   return ecx_readPDOmapCA(&ecx_context, Slave, Osize, Isize);
+   return ecx_readPDOmapCA(&ecx_context, Slave, Thread_n, Osize, Isize);
 }
 
 /** CoE read Object Description List.

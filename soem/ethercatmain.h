@@ -1,42 +1,6 @@
 /*
- * Simple Open EtherCAT Master Library
- *
- * File    : ethercatmain.h
- * Version : 1.3.1
- * Date    : 11-03-2015
- * Copyright (C) 2005-2015 Speciaal Machinefabriek Ketels v.o.f.
- * Copyright (C) 2005-2015 Arthur Ketels
- * Copyright (C) 2008-2009 TU/e Technische Universiteit Eindhoven
- * Copyright (C) 2014-2015 rt-labs AB , Sweden
- *
- * SOEM is free software; you can redistribute it and/or modify it under
- * the terms of the GNU General Public License version 2 as published by the Free
- * Software Foundation.
- *
- * SOEM is distributed in the hope that it will be useful, but WITHOUT ANY
- * WARRANTY; without even the implied warranty of MERCHANTABILITY or
- * FITNESS FOR A PARTICULAR PURPOSE.  See the GNU General Public License
- * for more details.
- *
- * As a special exception, if other files instantiate templates or use macros
- * or inline functions from this file, or you compile this file and link it
- * with other works to produce a work based on this file, this file does not
- * by itself cause the resulting work to be covered by the GNU General Public
- * License. However the source code for this file must still be made available
- * in accordance with section (3) of the GNU General Public License.
- *
- * This exception does not invalidate any other reasons why a work based on
- * this file might be covered by the GNU General Public License.
- *
- * The EtherCAT Technology, the trade name and logo “EtherCAT” are the intellectual
- * property of, and protected by Beckhoff Automation GmbH. You can use SOEM for
- * the sole purpose of creating, using and/or selling or otherwise distributing
- * an EtherCAT network master provided that an EtherCAT Master License is obtained
- * from Beckhoff Automation GmbH.
- *
- * In case you did not receive a copy of the EtherCAT Master License along with
- * SOEM write to Beckhoff Automation GmbH, Eiserstraße 5, D-33415 Verl, Germany
- * (www.beckhoff.com).
+ * Licensed under the GNU General Public License version 2 with exceptions. See
+ * LICENSE file in the project root for full license information
  */
 
 /** \file
@@ -73,6 +37,8 @@ extern "C"
 #define EC_MAXFMMU        4
 /** max. Adapter */
 #define EC_MAXLEN_ADAPTERNAME    128
+/** define maximum number of concurrent threads in mapping */
+#define EC_MAX_MAPT           1
 
 typedef struct ec_adapter ec_adaptert;
 struct ec_adapter
@@ -84,7 +50,7 @@ struct ec_adapter
 
 /** record for FMMU */
 PACKED_BEGIN
-typedef struct PACKED
+typedef struct PACKED ec_fmmu
 {
    uint32  LogStart;
    uint16  LogLength;
@@ -101,7 +67,7 @@ PACKED_END
 
 /** record for sync manager */
 PACKED_BEGIN
-typedef struct PACKED
+typedef struct PACKED ec_sm
 {
    uint16  StartAddr;
    uint16  SMlength;
@@ -110,7 +76,7 @@ typedef struct PACKED
 PACKED_END
 
 PACKED_BEGIN
-typedef struct PACKED
+typedef struct PACKED ec_state_status
 {
    uint16  State;
    uint16  Unused;
@@ -135,7 +101,7 @@ PACKED_END
 #define EC_SMENABLEMASK      0xfffeffff
 
 /** for list of ethercat slaves detected */
-typedef struct
+typedef struct ec_slave
 {
    /** state of slave */
    uint16           state;
@@ -257,7 +223,7 @@ typedef struct
    uint8            group;
    /** first unused FMMU */
    uint8            FMMUunused;
-   /** TRUE is slave is not responding at all */
+   /** Boolean for tracking whether the slave is (not) responding, not used/set by the SOEM library */
    boolean          islost;
    /** registered configuration function PO->SO */
    int              (*PO2SOconfig)(uint16 slave);
@@ -266,7 +232,7 @@ typedef struct
 } ec_slavet;
 
 /** for list of ethercat slave groups */
-typedef struct
+typedef struct ec_group
 {
    /** logical start address for this group */
    uint32           logstartaddr;
@@ -303,7 +269,7 @@ typedef struct
 } ec_groupt;
 
 /** SII FMMU structure */
-typedef struct
+typedef struct ec_eepromFMMU
 {
    uint16  Startpos;
    uint8   nFMMU;
@@ -314,7 +280,7 @@ typedef struct
 } ec_eepromFMMUt;
 
 /** SII SM structure */
-typedef struct
+typedef struct ec_eepromSM
 {
    uint16  Startpos;
    uint8   nSM;
@@ -327,7 +293,7 @@ typedef struct
 } ec_eepromSMt;
 
 /** record to store rxPDO and txPDO table from eeprom */
-typedef struct
+typedef struct ec_eepromPDO
 {
    uint16  Startpos;
    uint16  Length;
@@ -343,7 +309,7 @@ typedef uint8 ec_mbxbuft[EC_MAXMBX + 1];
 
 /** standard ethercat mailbox header */
 PACKED_BEGIN
-typedef struct PACKED
+typedef struct PACKED ec_mbxheader
 {
    uint16  length;
    uint16  address;
@@ -354,7 +320,7 @@ PACKED_END
 
 /** ALstatus and ALstatus code */
 PACKED_BEGIN
-typedef struct PACKED
+typedef struct PACKED ec_alstatus
 {
    uint16  alstatus;
    uint16  unused;
@@ -363,7 +329,7 @@ typedef struct PACKED
 PACKED_END
 
 /** stack structure to store segmented LRD/LWR/LRW constructs */
-typedef struct
+typedef struct ec_idxstack
 {
    uint8   pushed;
    uint8   pulled;
@@ -373,7 +339,7 @@ typedef struct
 } ec_idxstackT;
 
 /** ringbuf for error storage */
-typedef struct
+typedef struct ec_ering
 {
    int16     head;
    int16     tail;
@@ -382,7 +348,7 @@ typedef struct
 
 /** SyncManager Communication Type structure for CA */
 PACKED_BEGIN
-typedef struct PACKED
+typedef struct PACKED ec_SMcommtype
 {
    uint8   n;
    uint8   nu1;
@@ -392,7 +358,7 @@ PACKED_END
 
 /** SDO assign structure for CA */
 PACKED_BEGIN
-typedef struct PACKED
+typedef struct PACKED ec_PDOassign
 {
    uint8   n;
    uint8   nu1;
@@ -402,7 +368,7 @@ PACKED_END
 
 /** SDO description structure for CA */
 PACKED_BEGIN
-typedef struct PACKED
+typedef struct PACKED ec_PDOdesc
 {
    uint8   n;
    uint8   nu1;
@@ -411,7 +377,7 @@ typedef struct PACKED
 PACKED_END
 
 /** Context structure , referenced by all ecx functions*/
-typedef struct
+typedef struct ecx_context
 {
    /** port reference, may include red_port */
    ecx_portt      *port;
@@ -501,8 +467,10 @@ int ec_writeeepromFP(uint16 configadr, uint16 eeproma, uint16 data, int timeout)
 void ec_readeeprom1(uint16 slave, uint16 eeproma);
 uint32 ec_readeeprom2(uint16 slave, int timeout);
 int ec_send_processdata_group(uint8 group);
+int ec_send_overlap_processdata_group(uint8 group);
 int ec_receive_processdata_group(uint8 group, int timeout);
 int ec_send_processdata(void);
+int ec_send_overlap_processdata(void);
 int ec_receive_processdata(int timeout);
 #endif
 
@@ -541,9 +509,10 @@ uint64 ecx_readeepromFP(ecx_contextt *context, uint16 configadr, uint16 eeproma,
 int ecx_writeeepromFP(ecx_contextt *context, uint16 configadr, uint16 eeproma, uint16 data, int timeout);
 void ecx_readeeprom1(ecx_contextt *context, uint16 slave, uint16 eeproma);
 uint32 ecx_readeeprom2(ecx_contextt *context, uint16 slave, int timeout);
-int ecx_send_processdata_group(ecx_contextt *context, uint8 group);
+int ecx_send_overlap_processdata_group(ecx_contextt *context, uint8 group);
 int ecx_receive_processdata_group(ecx_contextt *context, uint8 group, int timeout);
 int ecx_send_processdata(ecx_contextt *context);
+int ecx_send_overlap_processdata(ecx_contextt *context);
 int ecx_receive_processdata(ecx_contextt *context, int timeout);
 
 #ifdef __cplusplus

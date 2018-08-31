@@ -1,42 +1,6 @@
 /*
- * Simple Open EtherCAT Master Library
- *
- * File    : ethercatmain.c
- * Version : 1.3.1
- * Date    : 11-03-2015
- * Copyright (C) 2005-2015 Speciaal Machinefabriek Ketels v.o.f.
- * Copyright (C) 2005-2015 Arthur Ketels
- * Copyright (C) 2008-2009 TU/e Technische Universiteit Eindhoven
- * Copyright (C) 2014-2015 rt-labs AB , Sweden
- *
- * SOEM is free software; you can redistribute it and/or modify it under
- * the terms of the GNU General Public License version 2 as published by the Free
- * Software Foundation.
- *
- * SOEM is distributed in the hope that it will be useful, but WITHOUT ANY
- * WARRANTY; without even the implied warranty of MERCHANTABILITY or
- * FITNESS FOR A PARTICULAR PURPOSE.  See the GNU General Public License
- * for more details.
- *
- * As a special exception, if other files instantiate templates or use macros
- * or inline functions from this file, or you compile this file and link it
- * with other works to produce a work based on this file, this file does not
- * by itself cause the resulting work to be covered by the GNU General Public
- * License. However the source code for this file must still be made available
- * in accordance with section (3) of the GNU General Public License.
- *
- * This exception does not invalidate any other reasons why a work based on
- * this file might be covered by the GNU General Public License.
- *
- * The EtherCAT Technology, the trade name and logo “EtherCAT” are the intellectual
- * property of, and protected by Beckhoff Automation GmbH. You can use SOEM for
- * the sole purpose of creating, using and/or selling or otherwise distributing
- * an EtherCAT network master provided that an EtherCAT Master License is obtained
- * from Beckhoff Automation GmbH.
- *
- * In case you did not receive a copy of the EtherCAT Master License along with
- * SOEM write to Beckhoff Automation GmbH, Eiserstraße 5, D-33415 Verl, Germany
- * (www.beckhoff.com).
+ * Licensed under the GNU General Public License version 2 with exceptions. See
+ * LICENSE file in the project root for full license information
  */
 
 /**
@@ -117,11 +81,11 @@ static ec_eringt        ec_elist;
 static ec_idxstackT     ec_idxstack;
 
 /** SyncManager Communication Type struct to store data of one slave */
-static ec_SMcommtypet   ec_SMcommtype;
+static ec_SMcommtypet   ec_SMcommtype[EC_MAX_MAPT];
 /** PDO assign struct to store data of one slave */
-static ec_PDOassignt    ec_PDOassign;
+static ec_PDOassignt    ec_PDOassign[EC_MAX_MAPT];
 /** PDO description struct to store data of one slave */
-static ec_PDOdesct      ec_PDOdesc;
+static ec_PDOdesct      ec_PDOdesc[EC_MAX_MAPT];
 
 /** buffer for EEPROM SM data */
 static ec_eepromSMt     ec_SM;
@@ -136,27 +100,27 @@ ecx_portt               ecx_port;
 ecx_redportt            ecx_redport;
 
 ecx_contextt  ecx_context = {
-    &ecx_port,       // .port          =
-    &ec_slave[0],    // .slavelist     =
-    &ec_slavecount,  // .slavecount    =
-    EC_MAXSLAVE,     // .maxslave      =
-    &ec_group[0],    // .grouplist     =
-    EC_MAXGROUP,     // .maxgroup      =
-    &ec_esibuf[0],   // .esibuf        =
-    &ec_esimap[0],   // .esimap        =
-    0,               // .esislave      =
-    &ec_elist,       // .elist         =
-    &ec_idxstack,    // .idxstack      =
-    &EcatError,      // .ecaterror     =
-    0,               // .DCtO          =
-    0,               // .DCl           =
-    &ec_DCtime,      // .DCtime        =
-    &ec_SMcommtype,  // .SMcommtype    =
-    &ec_PDOassign,   // .PDOassign     =
-    &ec_PDOdesc,     // .PDOdesc       =
-    &ec_SM,          // .eepSM         =
-    &ec_FMMU,        // .eepFMMU       =
-    NULL             // .FOEhook()
+    &ecx_port,          // .port          =
+    &ec_slave[0],       // .slavelist     =
+    &ec_slavecount,     // .slavecount    =
+    EC_MAXSLAVE,        // .maxslave      =
+    &ec_group[0],       // .grouplist     =
+    EC_MAXGROUP,        // .maxgroup      =
+    &ec_esibuf[0],      // .esibuf        =
+    &ec_esimap[0],      // .esimap        =
+    0,                  // .esislave      =
+    &ec_elist,          // .elist         =
+    &ec_idxstack,       // .idxstack      =
+    &EcatError,         // .ecaterror     =
+    0,                  // .DCtO          =
+    0,                  // .DCl           =
+    &ec_DCtime,         // .DCtime        =
+    &ec_SMcommtype[0],  // .SMcommtype    =
+    &ec_PDOassign[0],   // .PDOassign     =
+    &ec_PDOdesc[0],     // .PDOdesc       =
+    &ec_SM,             // .eepSM         =
+    &ec_FMMU,           // .eepFMMU       =
+    NULL                // .FOEhook()
 };
 #endif
 
@@ -756,45 +720,104 @@ int ecx_FPRD_multi(ecx_contextt *context, int n, uint16 *configlst, ec_alstatust
  */
 int ecx_readstate(ecx_contextt *context)
 {
-   uint16 slave, fslave, lslave, configadr, lowest, rval;
+   uint16 slave, fslave, lslave, configadr, lowest, rval, bitwisestate;
    ec_alstatust sl[MAX_FPRD_MULTI];
    uint16 slca[MAX_FPRD_MULTI];
+   boolean noerrorflag, allslavessamestate;
+   boolean allslavespresent = FALSE;
+   int wkc;
 
-   lowest = 0xff;
-   context->slavelist[0].ALstatuscode = 0;
-   fslave = 1;
-   do
+   /* Try to establish the state of all slaves sending only one broadcast datargam.
+    * This way a number of datagrams equal to the number of slaves will be sent only if needed.*/
+   rval = 0;
+   wkc = ecx_BRD(context->port, 0, ECT_REG_ALSTAT, sizeof(rval), &rval, EC_TIMEOUTRET);
+
+   if(wkc >= *(context->slavecount))
    {
-      lslave = *(context->slavecount);
-      if ((lslave - fslave) >= MAX_FPRD_MULTI)
-      {
-         lslave = fslave + MAX_FPRD_MULTI - 1;
-      }
-      for (slave = fslave; slave <= lslave; slave++)
-      {
-         const ec_alstatust zero = {0, 0, 0};
+      allslavespresent = TRUE;
+   }
 
-         configadr = context->slavelist[slave].configadr;
-         slca[slave - fslave] = configadr;
-         sl[slave - fslave] = zero;
-      }
-      ecx_FPRD_multi(context, (lslave - fslave) + 1, &(slca[0]), &(sl[0]), EC_TIMEOUTRET3);
-      for (slave = fslave; slave <= lslave; slave++)
+   rval = etohs(rval);
+   bitwisestate = (rval & 0x0f);
+
+   if ((rval & EC_STATE_ERROR) == 0)
+   {
+      noerrorflag = TRUE;
+      context->slavelist[0].ALstatuscode = 0;
+   }   
+   else
+   {
+      noerrorflag = FALSE;
+   }
+
+   switch (bitwisestate)
+   {
+      case EC_STATE_INIT:
+      case EC_STATE_PRE_OP:
+      case EC_STATE_BOOT:
+      case EC_STATE_SAFE_OP:
+      case EC_STATE_OPERATIONAL:
+         allslavessamestate = TRUE;
+         context->slavelist[0].state = bitwisestate;
+         break;
+      default:
+         allslavessamestate = FALSE;
+         break;
+   }
+    
+   if (noerrorflag && allslavessamestate && allslavespresent)
+   {
+      /* No slave has toggled the error flag so the alstatuscode
+       * (even if different from 0) should be ignored and
+       * the slaves have reached the same state so the internal state
+       * can be updated without sending any datagram. */
+      for (slave = 1; slave <= *(context->slavecount); slave++)
       {
-         configadr = context->slavelist[slave].configadr;
-         rval = etohs(sl[slave - fslave].alstatus);
-         context->slavelist[slave].ALstatuscode = etohs(sl[slave - fslave].alstatuscode);
-         if ((rval & 0xf) < lowest)
+         context->slavelist[slave].ALstatuscode = 0x0000;
+         context->slavelist[slave].state = bitwisestate;
+      }
+      lowest = bitwisestate;
+   }
+   else
+   {
+      /* Not all slaves have the same state or at least one is in error so one datagram per slave
+       * is needed. */
+      context->slavelist[0].ALstatuscode = 0;
+      lowest = 0xff;
+      fslave = 1;
+      do
+      {
+         lslave = *(context->slavecount);
+         if ((lslave - fslave) >= MAX_FPRD_MULTI)
          {
-            lowest = (rval & 0xf);
+            lslave = fslave + MAX_FPRD_MULTI - 1;
          }
-         context->slavelist[slave].state = rval;
-         context->slavelist[0].ALstatuscode |= context->slavelist[slave].ALstatuscode;
-      }
-      fslave = lslave + 1;
-   } while(lslave < *(context->slavecount));
-   context->slavelist[0].state = lowest;
+         for (slave = fslave; slave <= lslave; slave++)
+         {
+            const ec_alstatust zero = { 0, 0, 0 };
 
+            configadr = context->slavelist[slave].configadr;
+            slca[slave - fslave] = configadr;
+            sl[slave - fslave] = zero;
+         }
+         ecx_FPRD_multi(context, (lslave - fslave) + 1, &(slca[0]), &(sl[0]), EC_TIMEOUTRET3);
+         for (slave = fslave; slave <= lslave; slave++)
+         {
+            configadr = context->slavelist[slave].configadr;
+            rval = etohs(sl[slave - fslave].alstatus);
+            context->slavelist[slave].ALstatuscode = etohs(sl[slave - fslave].alstatuscode);
+            if ((rval & 0xf) < lowest)
+            {
+               lowest = (rval & 0xf);
+            }
+            context->slavelist[slave].state = rval;
+            context->slavelist[0].ALstatuscode |= context->slavelist[slave].ALstatuscode;
+         }
+         fslave = lslave + 1;
+      } while (lslave < *(context->slavecount));
+      context->slavelist[0].state = lowest;
+   }
+  
    return lowest;
 }
 
@@ -827,8 +850,9 @@ int ecx_writestate(ecx_contextt *context, uint16 slave)
 
 /** Check actual slave state.
  * This is a blocking function.
+ * To refresh the state of all slaves ecx_readstate()should be called
  * @param[in] context     = context struct
- * @param[in] slave       = Slave number, 0 = all slaves
+ * @param[in] slave       = Slave number, 0 = all slaves (only the "slavelist[0].state" is refreshed)
  * @param[in] reqstate    = Requested state
  * @param[in] timeout     = Timout value in us
  * @return Requested state, or found state after timeout.
@@ -1647,7 +1671,7 @@ static void ecx_clearindex(ecx_contextt *context)  {
  * @param[in]  group          = group number
  * @return >0 if processdata is transmitted.
  */
-int ecx_send_processdata_group(ecx_contextt *context, uint8 group)
+static int ecx_main_send_processdata(ecx_contextt *context, uint8 group, boolean use_overlap_io)
 {
    uint32 LogAdr;
    uint16 w1, w2;
@@ -1657,20 +1681,36 @@ int ecx_send_processdata_group(ecx_contextt *context, uint8 group)
    uint8* data;
    boolean first=FALSE;
    uint16 currentsegment = 0;
+   uint32 iomapinputoffset;
 
    wkc = 0;
    if(context->grouplist[group].hasdc)
    {
       first = TRUE;
    }
-   length = context->grouplist[group].Obytes + context->grouplist[group].Ibytes;
+
+   /* For overlapping IO map use the biggest */
+   if(use_overlap_io == TRUE)
+   {
+      /* For overlap IOmap make the frame EQ big to biggest part */
+      length = (context->grouplist[group].Obytes > context->grouplist[group].Ibytes) ?
+         context->grouplist[group].Obytes : context->grouplist[group].Ibytes;
+      /* Save the offset used to compensate where to save inputs when frame returns */
+      iomapinputoffset = context->grouplist[group].Obytes;
+   }
+   else
+   {
+      length = context->grouplist[group].Obytes + context->grouplist[group].Ibytes;
+      iomapinputoffset = 0;
+   }
+   
    LogAdr = context->grouplist[group].logstartaddr;
-   if (length)
+   if(length)
    {
 
       wkc = 1;
       /* LRW blocked by one or more slaves ? */
-      if (context->grouplist[group].blockLRW)
+      if(context->grouplist[group].blockLRW)
       {
          /* if inputs available generate LRD */
          if(context->grouplist[group].Ibytes)
@@ -1762,6 +1802,8 @@ int ecx_send_processdata_group(ecx_contextt *context, uint8 group)
          else
          {
             data = context->grouplist[group].inputs;
+            /* Clear offset, don't compensate for overlapping IOmap if we only got inputs */
+            iomapinputoffset = 0;
          }
          /* segment transfer if needed */
          do
@@ -1783,8 +1825,12 @@ int ecx_send_processdata_group(ecx_contextt *context, uint8 group)
             }
             /* send frame */
             ecx_outframe_red(context->port, idx);
-            /* push index and data pointer on stack */
-            ecx_pushindex(context, idx, data, sublength);
+            /* push index and data pointer on stack.
+             * the iomapinputoffset compensate for where the inputs are stored 
+             * in the IOmap if we use an overlapping IOmap. If a regular IOmap
+             * is used it should always be 0.
+             */
+            ecx_pushindex(context, idx, (data + iomapinputoffset), sublength);      
             length -= sublength;
             LogAdr += sublength;
             data += sublength;
@@ -1793,6 +1839,40 @@ int ecx_send_processdata_group(ecx_contextt *context, uint8 group)
    }
 
    return wkc;
+}
+
+/** Transmit processdata to slaves.
+* Uses LRW, or LRD/LWR if LRW is not allowed (blockLRW).
+* Both the input and output processdata are transmitted in the overlapped IOmap.
+* The outputs with the actual data, the inputs replace the output data in the
+* returning frame. The inputs are gathered with the receive processdata function.
+* In contrast to the base LRW function this function is non-blocking.
+* If the processdata does not fit in one datagram, multiple are used.
+* In order to recombine the slave response, a stack is used.
+* @param[in]  context        = context struct
+* @param[in]  group          = group number
+* @return >0 if processdata is transmitted.
+*/
+int ecx_send_overlap_processdata_group(ecx_contextt *context, uint8 group)
+{
+   return ecx_main_send_processdata(context, group, TRUE);
+}
+
+/** Transmit processdata to slaves.
+* Uses LRW, or LRD/LWR if LRW is not allowed (blockLRW).
+* Both the input and output processdata are transmitted.
+* The outputs with the actual data, the inputs have a placeholder.
+* The inputs are gathered with the receive processdata function.
+* In contrast to the base LRW function this function is non-blocking.
+* If the processdata does not fit in one datagram, multiple are used.
+* In order to recombine the slave response, a stack is used.
+* @param[in]  context        = context struct
+* @param[in]  group          = group number
+* @return >0 if processdata is transmitted.
+*/
+int ecx_send_processdata_group(ecx_contextt *context, uint8 group)
+{
+   return ecx_main_send_processdata(context, group, FALSE);
 }
 
 /** Receive processdata from slaves.
@@ -1885,6 +1965,11 @@ int ecx_receive_processdata_group(ecx_contextt *context, uint8 group, int timeou
 int ecx_send_processdata(ecx_contextt *context)
 {
    return ecx_send_processdata_group(context, 0);
+}
+
+int ecx_send_overlap_processdata(ecx_contextt *context)
+{
+   return ecx_send_overlap_processdata_group(context, 0);
 }
 
 int ecx_receive_processdata(ecx_contextt *context, int timeout)
@@ -2241,6 +2326,24 @@ int ec_send_processdata_group(uint8 group)
    return ecx_send_processdata_group (&ecx_context, group);
 }
 
+/** Transmit processdata to slaves.
+* Uses LRW, or LRD/LWR if LRW is not allowed (blockLRW).
+* Both the input and output processdata are transmitted in the overlapped IOmap.
+* The outputs with the actual data, the inputs replace the output data in the
+* returning frame. The inputs are gathered with the receive processdata function.
+* In contrast to the base LRW function this function is non-blocking.
+* If the processdata does not fit in one datagram, multiple are used.
+* In order to recombine the slave response, a stack is used.
+* @param[in]  context        = context struct
+* @param[in]  group          = group number
+* @return >0 if processdata is transmitted.
+* @see ecx_send_overlap_processdata_group
+*/
+int ec_send_overlap_processdata_group(uint8 group)
+{
+   return ecx_send_overlap_processdata_group(&ecx_context, group);
+}
+
 /** Receive processdata from slaves.
  * Second part from ec_send_processdata().
  * Received datagrams are recombined with the processdata with help from the stack.
@@ -2258,6 +2361,11 @@ int ec_receive_processdata_group(uint8 group, int timeout)
 int ec_send_processdata(void)
 {
    return ec_send_processdata_group(0);
+}
+
+int ec_send_overlap_processdata(void)
+{
+   return ec_send_overlap_processdata_group(0);
 }
 
 int ec_receive_processdata(int timeout)

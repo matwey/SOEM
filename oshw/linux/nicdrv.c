@@ -1,42 +1,6 @@
 /*
- * Simple Open EtherCAT Master Library
- *
- * File    : nicdrv.c
- * Version : 1.3.1
- * Date    : 11-03-2015
- * Copyright (C) 2005-2015 Speciaal Machinefabriek Ketels v.o.f.
- * Copyright (C) 2005-2015 Arthur Ketels
- * Copyright (C) 2008-2009 TU/e Technische Universiteit Eindhoven
- * Copyright (C) 2014-2015 rt-labs AB , Sweden
- *
- * SOEM is free software; you can redistribute it and/or modify it under
- * the terms of the GNU General Public License version 2 as published by the Free
- * Software Foundation.
- *
- * SOEM is distributed in the hope that it will be useful, but WITHOUT ANY
- * WARRANTY; without even the implied warranty of MERCHANTABILITY or
- * FITNESS FOR A PARTICULAR PURPOSE.  See the GNU General Public License
- * for more details.
- *
- * As a special exception, if other files instantiate templates or use macros
- * or inline functions from this file, or you compile this file and link it
- * with other works to produce a work based on this file, this file does not
- * by itself cause the resulting work to be covered by the GNU General Public
- * License. However the source code for this file must still be made available
- * in accordance with section (3) of the GNU General Public License.
- *
- * This exception does not invalidate any other reasons why a work based on
- * this file might be covered by the GNU General Public License.
- *
- * The EtherCAT Technology, the trade name and logo “EtherCAT” are the intellectual
- * property of, and protected by Beckhoff Automation GmbH. You can use SOEM for
- * the sole purpose of creating, using and/or selling or otherwise distributing
- * an EtherCAT network master provided that an EtherCAT Master License is obtained
- * from Beckhoff Automation GmbH.
- *
- * In case you did not receive a copy of the EtherCAT Master License along with
- * SOEM write to Beckhoff Automation GmbH, Eiserstraße 5, D-33415 Verl, Germany
- * (www.beckhoff.com).
+ * Licensed under the GNU General Public License version 2 with exceptions. See
+ * LICENSE file in the project root for full license information
  */
 
 /** \file
@@ -131,6 +95,7 @@ int ecx_setupnic(ecx_portt *port, const char *ifname, int secondary)
    struct ifreq ifr;
    struct sockaddr_ll sll;
    int *psock;
+   pthread_mutexattr_t mutexattr;
 
    rval = 0;
    if (secondary)
@@ -159,9 +124,11 @@ int ecx_setupnic(ecx_portt *port, const char *ifname, int secondary)
    }
    else
    {
-      pthread_mutex_init(&(port->getindex_mutex), NULL);
-      pthread_mutex_init(&(port->tx_mutex)      , NULL);
-      pthread_mutex_init(&(port->rx_mutex)      , NULL);
+      pthread_mutexattr_init(&mutexattr);
+      pthread_mutexattr_setprotocol(&mutexattr  , PTHREAD_PRIO_INHERIT);
+      pthread_mutex_init(&(port->getindex_mutex), &mutexattr);
+      pthread_mutex_init(&(port->tx_mutex)      , &mutexattr);
+      pthread_mutex_init(&(port->rx_mutex)      , &mutexattr);
       port->sockhandle        = -1;
       port->lastidx           = 0;
       port->redstate          = ECT_RED_NONE;
@@ -194,7 +161,7 @@ int ecx_setupnic(ecx_portt *port, const char *ifname, int secondary)
    r = ioctl(*psock, SIOCGIFFLAGS, &ifr);
    /* set flags of NIC interface, here promiscuous and broadcast */
    ifr.ifr_flags = ifr.ifr_flags | IFF_PROMISC | IFF_BROADCAST;
-   r = ioctl(*psock, SIOCGIFFLAGS, &ifr);
+   r = ioctl(*psock, SIOCSIFFLAGS, &ifr);
    /* bind socket to protocol, in this case RAW EtherCAT */
    sll.sll_family = AF_PACKET;
    sll.sll_ifindex = ifindex;
@@ -314,8 +281,12 @@ int ecx_outframe(ecx_portt *port, int idx, int stacknumber)
       stack = &(port->redport->stack);
    }
    lp = (*stack->txbuflength)[idx];
-   rval = send(*stack->sock, (*stack->txbuf)[idx], lp, 0);
    (*stack->rxbufstat)[idx] = EC_BUF_TX;
+   rval = send(*stack->sock, (*stack->txbuf)[idx], lp, 0);
+   if (rval == -1)
+   {
+      (*stack->rxbufstat)[idx] = EC_BUF_EMPTY;
+   }
 
    return rval;
 }
@@ -347,9 +318,12 @@ int ecx_outframe_red(ecx_portt *port, int idx)
       /* rewrite MAC source address 1 to secondary */
       ehp->sa1 = htons(secMAC[1]);
       /* transmit over secondary socket */
-      send(port->redport->sockhandle, &(port->txbuf2), port->txbuflength2 , 0);
-      pthread_mutex_unlock( &(port->tx_mutex) );
       port->redport->rxbufstat[idx] = EC_BUF_TX;
+      if (send(port->redport->sockhandle, &(port->txbuf2), port->txbuflength2 , 0) == -1)
+      {
+         port->redport->rxbufstat[idx] = EC_BUF_EMPTY;
+      }
+      pthread_mutex_unlock( &(port->tx_mutex) );
    }
 
    return rval;
